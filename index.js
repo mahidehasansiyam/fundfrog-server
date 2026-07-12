@@ -18,7 +18,7 @@ app.use(
     origin: 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key'],
   }),
 );
 
@@ -37,6 +37,9 @@ let db;
 let users;
 let campaigns;
 let contributions;
+let reports;
+let withdrawals;
+let payments;
 
 async function run() {
   try {
@@ -46,6 +49,9 @@ async function run() {
     users = db.collection('users');
     campaigns = db.collection('campaigns');
     contributions = db.collection('contributions');
+    reports = db.collection('reports');
+    withdrawals = db.collection('withdrawals');
+    payments = db.collection('payments');
   } finally {
     // await client.close();
   }
@@ -595,6 +601,318 @@ app.get('/api/contributions', verifyToken, async (req, res) => {
       page,
       totalPages: Math.ceil(total / limit),
     });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Payment verify (internal, called by Next.js Route Handler) ──
+
+app.post('/api/payments/verify', async (req, res) => {
+  try {
+    const key = req.headers['x-internal-key'];
+    if (key !== process.env.INTERNAL_API_KEY) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    const { stripeSessionId, credits, email, name, amountPaid } = req.body;
+
+    await payments.insertOne({
+      email,
+      name,
+      creditsPurchased: credits,
+      amountPaid,
+      stripeSessionId,
+      date: new Date(),
+    });
+
+    await users.updateOne({ email }, { $inc: { credits } });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Verify error:', error);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Admin routes ──────────────────────────────────────────────
+
+app.get('/api/admin/stats', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const supporters = await users.countDocuments({ role: 'supporter' });
+    const creators = await users.countDocuments({ role: 'creator' });
+    const creditResult = await users.aggregate([
+      { $group: { _id: null, total: { $sum: '$credits' } } },
+    ]).toArray();
+    const totalCredits = creditResult.length > 0 ? creditResult[0].total : 0;
+
+    res.json({ stats: { totalSupporters: supporters, totalCreators: creators, totalCredits, totalPayments: 0 } });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/admin/pending-campaigns', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const pending = await campaigns.find({ status: 'pending' }).sort({ createdAt: -1 }).toArray();
+    res.json({ campaigns: pending });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    if (campaign.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending campaigns can be approved.' });
+    }
+
+    await campaigns.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'approved' } },
+    );
+
+    const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ campaign: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    if (campaign.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending campaigns can be rejected.' });
+    }
+
+    await campaigns.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'rejected' } },
+    );
+
+    const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ campaign: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/admin/pending-withdrawals', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const pending = await withdrawals.find({ status: 'pending' }).sort({ date: -1 }).toArray();
+    res.json({ withdrawals: pending });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const withdrawal = await withdrawals.findOne({ _id: new ObjectId(req.params.id) });
+    if (!withdrawal) {
+      return res.status(404).json({ message: 'Withdrawal not found.' });
+    }
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending withdrawals can be approved.' });
+    }
+
+    await withdrawals.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'approved' } },
+    );
+
+    const updated = await withdrawals.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ withdrawal: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/users', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const allUsers = await users.find({}).project({ password: 0 }).toArray();
+    const sanitized = allUsers.map((u) => ({
+      id: u._id.toString(),
+      name: u.name,
+      email: u.email,
+      photoURL: u.photoURL || '',
+      role: u.role,
+      credits: u.credits,
+      createdAt: u.createdAt,
+    }));
+
+    res.json({ users: sanitized });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/users/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const { role } = req.body;
+    if (!role || !['supporter', 'creator', 'admin'].includes(role)) {
+      return res.status(400).json({ message: 'Role must be "supporter", "creator", or "admin".' });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(req.params.id) });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    await users.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { role } },
+    );
+
+    const updated = await users.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ user: sanitizeUser(updated) });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.delete('/api/users/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(req.params.id) });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    const adminCount = await users.countDocuments({ role: 'admin' });
+    if (adminCount <= 1 && user.role === 'admin') {
+      return res.status(400).json({ message: 'Cannot delete the last admin.' });
+    }
+
+    await users.deleteOne({ _id: new ObjectId(req.params.id) });
+    res.json({ message: 'User deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.delete('/api/campaigns/:id/admin', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+
+    const approvedContributions = await contributions.find({ campaignId: req.params.id, status: 'approved' }).toArray();
+    for (const c of approvedContributions) {
+      await users.updateOne({ email: c.supporterEmail }, { $inc: { credits: c.amount } });
+    }
+    await contributions.deleteMany({ campaignId: req.params.id });
+    await campaigns.deleteOne({ _id: new ObjectId(req.params.id) });
+
+    res.json({ message: 'Campaign deleted and supporters refunded.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/reports', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const allReports = await reports.find({}).sort({ date: -1 }).toArray();
+    res.json({ reports: allReports });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.post('/api/reports', verifyToken, async (req, res) => {
+  try {
+    const { campaignId, campaignTitle, reason } = req.body;
+    if (!campaignId || !campaignTitle || !reason) {
+      return res.status(400).json({ message: 'Campaign ID, campaign title, and reason are required.' });
+    }
+
+    const report = {
+      reporterEmail: req.user.email,
+      campaignTitle,
+      campaignId,
+      reason,
+      date: new Date(),
+    };
+
+    const result = await reports.insertOne(report);
+    const saved = { ...report, _id: result.insertedId };
+
+    res.status(201).json({ report: saved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.delete('/api/campaigns/:id/suspend', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+
+    await campaigns.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'suspended' } },
+    );
+
+    const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ campaign: updated });
   } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
