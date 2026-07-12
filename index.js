@@ -479,6 +479,127 @@ app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
   }
 });
 
+// ─── Supporter routes ──────────────────────────────────────────
+
+app.get('/api/supporter/stats', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'supporter') {
+      return res.status(403).json({ message: 'Access denied. Supporters only.' });
+    }
+
+    const allContributions = await contributions.find({ supporterEmail: req.user.email }).toArray();
+    const totalContributions = allContributions.length;
+    const pendingCount = allContributions.filter((c) => c.status === 'pending').length;
+    const approvedAmount = allContributions
+      .filter((c) => c.status === 'approved')
+      .reduce((sum, c) => sum + (c.amount || 0), 0);
+
+    res.json({ stats: { totalContributions, pendingCount, approvedAmount } });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/supporter/approved-contributions', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'supporter') {
+      return res.status(403).json({ message: 'Access denied. Supporters only.' });
+    }
+
+    const approved = await contributions
+      .find({ supporterEmail: req.user.email, status: 'approved' })
+      .sort({ date: -1 })
+      .toArray();
+
+    res.json({ contributions: approved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.post('/api/contributions', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'supporter') {
+      return res.status(403).json({ message: 'Only supporters can contribute.' });
+    }
+
+    const { campaignId, amount } = req.body;
+    if (!campaignId || !amount) {
+      return res.status(400).json({ message: 'Campaign ID and amount are required.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(campaignId) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    if (campaign.status !== 'approved') {
+      return res.status(400).json({ message: 'Campaign is not currently accepting contributions.' });
+    }
+
+    const contributionAmount = Number(amount);
+    if (contributionAmount < campaign.minimumContribution) {
+      return res.status(400).json({ message: `Minimum contribution is ${campaign.minimumContribution} credits.` });
+    }
+
+    const user = await users.findOne({ email: req.user.email });
+    if (!user || user.credits < contributionAmount) {
+      return res.status(400).json({ message: 'Insufficient credits.' });
+    }
+
+    await users.updateOne({ email: req.user.email }, { $inc: { credits: -contributionAmount } });
+
+    const contribution = {
+      campaignId,
+      campaignTitle: campaign.title,
+      amount: contributionAmount,
+      supporterEmail: req.user.email,
+      supporterName: req.user.name,
+      creatorEmail: campaign.creatorEmail,
+      creatorName: campaign.creatorName,
+      date: new Date(),
+      status: 'pending',
+    };
+
+    const result = await contributions.insertOne(contribution);
+    const saved = { ...contribution, _id: result.insertedId };
+
+    res.status(201).json({ contribution: saved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/contributions', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'supporter') {
+      return res.status(403).json({ message: 'Access denied. Supporters only.' });
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const filter = { supporterEmail: req.user.email };
+
+    const total = await contributions.countDocuments(filter);
+    const items = await contributions
+      .find(filter)
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.json({
+      contributions: items,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('This is home page of client server.');
 });
