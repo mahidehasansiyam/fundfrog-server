@@ -47,6 +47,18 @@ function createCampaignsApp(mockCampaignsCollection, mockUsersCollection, mockCo
     }
   }
 
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+      }
+      if (!roles.includes(req.user.role)) {
+        return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+      }
+      next();
+    };
+  }
+
   // --- GET /api/campaigns (public) ---
   app.get('/api/campaigns', async (req, res) => {
     try {
@@ -87,12 +99,8 @@ function createCampaignsApp(mockCampaignsCollection, mockUsersCollection, mockCo
   });
 
   // --- POST /api/campaigns (creator only) ---
-  app.post('/api/campaigns', verifyToken, async (req, res) => {
+  app.post('/api/campaigns', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can create campaigns.' });
-      }
-
       const { title, story, category, fundingGoal, minimumContribution, deadline, rewardInfo, imageURL } = req.body;
 
       if (!title || !story || !category || !fundingGoal || !minimumContribution || !deadline) {
@@ -124,12 +132,8 @@ function createCampaignsApp(mockCampaignsCollection, mockUsersCollection, mockCo
   });
 
   // --- PUT /api/campaigns/:id (creator owner only) ---
-  app.put('/api/campaigns/:id', verifyToken, async (req, res) => {
+  app.put('/api/campaigns/:id', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can update campaigns.' });
-      }
-
       const campaign = await mockCampaignsCollection.findOne({ _id: new ObjectId(req.params.id) });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -158,12 +162,8 @@ function createCampaignsApp(mockCampaignsCollection, mockUsersCollection, mockCo
   });
 
   // --- DELETE /api/campaigns/:id (creator owner only) ---
-  app.delete('/api/campaigns/:id', verifyToken, async (req, res) => {
+  app.delete('/api/campaigns/:id', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can delete campaigns.' });
-      }
-
       const campaign = await mockCampaignsCollection.findOne({ _id: new ObjectId(req.params.id) });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -641,7 +641,7 @@ describe('Campaigns API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can create campaigns');
+      expect(result.body.message).toContain('Required role: creator');
     });
 
     it('should return 400 when required fields are missing', async () => {
@@ -795,7 +795,7 @@ describe('Campaigns API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can update campaigns');
+      expect(result.body.message).toContain('Required role: creator');
     });
 
     it('should return 403 when user is not the owner', async () => {
@@ -991,7 +991,7 @@ describe('Campaigns API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can delete campaigns');
+      expect(result.body.message).toContain('Required role: creator');
     });
 
     it('should return 403 when user is not the owner', async () => {

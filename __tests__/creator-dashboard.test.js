@@ -47,13 +47,21 @@ function createCreatorApp(mockCampaignsCollection, mockContributionsCollection, 
     }
   }
 
-  // --- GET /api/creator/stats ---
-  app.get('/api/creator/stats', verifyToken, async (req, res) => {
-    try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
       }
+      if (!roles.includes(req.user.role)) {
+        return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+      }
+      next();
+    };
+  }
 
+  // --- GET /api/creator/stats ---
+  app.get('/api/creator/stats', verifyToken, requireRole('creator'), async (req, res) => {
+    try {
       const now = new Date();
       const campaigns = await mockCampaignsCollection.find({ creatorEmail: req.user.email }).toArray();
       const totalCampaigns = campaigns.length;
@@ -69,12 +77,8 @@ function createCreatorApp(mockCampaignsCollection, mockContributionsCollection, 
   });
 
   // --- GET /api/creator/pending-contributions ---
-  app.get('/api/creator/pending-contributions', verifyToken, async (req, res) => {
+  app.get('/api/creator/pending-contributions', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
-      }
-
       const contributions = await mockContributionsCollection
         .find({ creatorEmail: req.user.email, status: 'pending' })
         .toArray();
@@ -86,12 +90,8 @@ function createCreatorApp(mockCampaignsCollection, mockContributionsCollection, 
   });
 
   // --- PATCH /api/contributions/:id/approve ---
-  app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/contributions/:id/approve', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
-      }
-
       const contribution = await mockContributionsCollection.findOne({ _id: new ObjectId(req.params.id) });
       if (!contribution) {
         return res.status(404).json({ message: 'Contribution not found.' });
@@ -131,12 +131,8 @@ function createCreatorApp(mockCampaignsCollection, mockContributionsCollection, 
   });
 
   // --- PATCH /api/contributions/:id/reject ---
-  app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
+  app.patch('/api/contributions/:id/reject', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
-      }
-
       const contribution = await mockContributionsCollection.findOne({ _id: new ObjectId(req.params.id) });
       if (!contribution) {
         return res.status(404).json({ message: 'Contribution not found.' });
@@ -409,7 +405,7 @@ describe('Creator Dashboard API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can access this resource');
+      expect(result.body.message).toContain('Required role: creator');
     });
   });
 
@@ -526,7 +522,7 @@ describe('Creator Dashboard API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can access this resource');
+      expect(result.body.message).toContain('Required role: creator');
     });
   });
 
@@ -718,7 +714,7 @@ describe('Creator Dashboard API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can access this resource');
+      expect(result.body.message).toContain('Required role: creator');
     });
   });
 
@@ -911,7 +907,7 @@ describe('Creator Dashboard API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only creators can access this resource');
+      expect(result.body.message).toContain('Required role: creator');
     });
   });
 });

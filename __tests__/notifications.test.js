@@ -56,6 +56,18 @@ function createNotificationsApp(mockCollections) {
     }
   }
 
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+      }
+      if (!roles.includes(req.user.role)) {
+        return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+      }
+      next();
+    };
+  }
+
   // ─────────────────────────────────────────────
   // GET /api/notifications
   // ─────────────────────────────────────────────
@@ -99,12 +111,8 @@ function createNotificationsApp(mockCollections) {
   // POST /api/contributions  (supporter submits a contribution)
   // Notification side-effect: notify campaign creator
   // ─────────────────────────────────────────────
-  app.post('/api/contributions', verifyToken, async (req, res) => {
+  app.post('/api/contributions', verifyToken, requireRole('supporter'), async (req, res) => {
     try {
-      if (req.user.role !== 'supporter') {
-        return res.status(403).json({ message: 'Only supporters can contribute.' });
-      }
-
       const { campaignId, amount } = req.body;
       if (!campaignId || !amount) {
         return res.status(400).json({ message: 'Campaign ID and amount are required.' });
@@ -170,12 +178,8 @@ function createNotificationsApp(mockCollections) {
   // PATCH /api/contributions/:id/approve  (creator approves a contribution)
   // Notification side-effect: notify supporter
   // ─────────────────────────────────────────────
-  app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/contributions/:id/approve', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
-      }
-
       const contribution = await mockContributions.findOne({ _id: req.params.id });
       if (!contribution) {
         return res.status(404).json({ message: 'Contribution not found.' });
@@ -221,12 +225,8 @@ function createNotificationsApp(mockCollections) {
   // PATCH /api/contributions/:id/reject  (creator rejects a contribution)
   // Notification side-effect: notify supporter
   // ─────────────────────────────────────────────
-  app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
+  app.patch('/api/contributions/:id/reject', verifyToken, requireRole('creator'), async (req, res) => {
     try {
-      if (req.user.role !== 'creator') {
-        return res.status(403).json({ message: 'Only creators can access this resource.' });
-      }
-
       const contribution = await mockContributions.findOne({ _id: req.params.id });
       if (!contribution) {
         return res.status(404).json({ message: 'Contribution not found.' });
@@ -273,12 +273,8 @@ function createNotificationsApp(mockCollections) {
   // PATCH /api/campaigns/:id/approve  (admin approves a campaign)
   // Notification side-effect: notify campaign creator
   // ─────────────────────────────────────────────
-  app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/campaigns/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
-
       const campaign = await mockCampaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -315,12 +311,8 @@ function createNotificationsApp(mockCollections) {
   // PATCH /api/campaigns/:id/reject  (admin rejects a campaign)
   // Notification side-effect: notify campaign creator
   // ─────────────────────────────────────────────
-  app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
+  app.patch('/api/campaigns/:id/reject', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
-
       const campaign = await mockCampaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -357,12 +349,8 @@ function createNotificationsApp(mockCollections) {
   // PATCH /api/withdrawals/:id/approve  (admin approves a withdrawal)
   // Notification side-effect: notify withdrawal creator
   // ─────────────────────────────────────────────
-  app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/withdrawals/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
-
       const withdrawal = await mockWithdrawals.findOne({ _id: req.params.id });
       if (!withdrawal) {
         return res.status(404).json({ message: 'Withdrawal not found.' });
