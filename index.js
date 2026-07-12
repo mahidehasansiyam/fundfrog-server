@@ -236,11 +236,13 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/campaigns', async (req, res) => {
   try {
-    const { top_funded, category, status, search } = req.query;
+    const { top_funded, category, status, search, creatorEmail } = req.query;
     const filter = {};
 
     if (category) filter.category = category;
-    filter.status = status || 'approved';
+    if (status) filter.status = status;
+    else filter.status = 'approved';
+    if (creatorEmail) filter.creatorEmail = creatorEmail;
 
     if (search) {
       filter.title = { $regex: search, $options: 'i' };
@@ -364,6 +366,114 @@ app.delete('/api/campaigns/:id', verifyToken, async (req, res) => {
     await campaigns.deleteOne({ _id: new ObjectId(req.params.id) });
 
     res.json({ message: 'Campaign deleted and supporters refunded.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Creator routes ───────────────────────────────────────────
+
+app.get('/api/creator/stats', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Access denied. Creators only.' });
+    }
+
+    const creatorCampaigns = await campaigns.find({ creatorEmail: req.user.email }).toArray();
+    const totalCampaigns = creatorCampaigns.length;
+    const now = new Date();
+    const activeCampaigns = creatorCampaigns.filter(
+      (c) => c.status === 'approved' && new Date(c.deadline) > now,
+    ).length;
+    const totalRaised = creatorCampaigns.reduce((sum, c) => sum + (c.amountRaised || 0), 0);
+
+    res.json({ stats: { totalCampaigns, activeCampaigns, totalRaised } });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/creator/pending-contributions', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Access denied. Creators only.' });
+    }
+
+    const pending = await contributions
+      .find({ creatorEmail: req.user.email, status: 'pending' })
+      .sort({ date: -1 })
+      .toArray();
+
+    res.json({ contributions: pending });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Access denied. Creators only.' });
+    }
+
+    const contribution = await contributions.findOne({ _id: new ObjectId(req.params.id) });
+    if (!contribution) {
+      return res.status(404).json({ message: 'Contribution not found.' });
+    }
+    if (contribution.creatorEmail !== req.user.email) {
+      return res.status(403).json({ message: 'This contribution does not belong to your campaign.' });
+    }
+    if (contribution.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending contributions can be approved.' });
+    }
+
+    await contributions.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'approved' } },
+    );
+
+    await campaigns.updateOne(
+      { _id: new ObjectId(contribution.campaignId) },
+      { $inc: { amountRaised: contribution.amount } },
+    );
+
+    const updated = await contributions.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ contribution: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Access denied. Creators only.' });
+    }
+
+    const contribution = await contributions.findOne({ _id: new ObjectId(req.params.id) });
+    if (!contribution) {
+      return res.status(404).json({ message: 'Contribution not found.' });
+    }
+    if (contribution.creatorEmail !== req.user.email) {
+      return res.status(403).json({ message: 'This contribution does not belong to your campaign.' });
+    }
+    if (contribution.status !== 'pending') {
+      return res.status(400).json({ message: 'Only pending contributions can be rejected.' });
+    }
+
+    // Refund credits to supporter
+    await users.updateOne(
+      { email: contribution.supporterEmail },
+      { $inc: { credits: contribution.amount } },
+    );
+
+    await contributions.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: 'rejected' } },
+    );
+
+    const updated = await contributions.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ contribution: updated });
   } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
