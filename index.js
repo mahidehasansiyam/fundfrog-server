@@ -40,6 +40,7 @@ let contributions;
 let reports;
 let withdrawals;
 let payments;
+let notifications;
 
 async function run() {
   try {
@@ -52,6 +53,7 @@ async function run() {
     reports = db.collection('reports');
     withdrawals = db.collection('withdrawals');
     payments = db.collection('payments');
+    notifications = db.collection('notifications');
   } finally {
     // await client.close();
   }
@@ -443,6 +445,15 @@ app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
       { $inc: { amountRaised: contribution.amount } },
     );
 
+    await notifications.insertOne({
+      message: `Your contribution of ${contribution.amount} credits to ${contribution.campaignTitle} was approved`,
+      toEmail: contribution.supporterEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/supporter/my-contributions',
+      read: false,
+      createdAt: new Date(),
+    });
+
     const updated = await contributions.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ contribution: updated });
   } catch (error) {
@@ -477,6 +488,15 @@ app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
       { _id: new ObjectId(req.params.id) },
       { $set: { status: 'rejected' } },
     );
+
+    await notifications.insertOne({
+      message: `Your contribution of ${contribution.amount} credits to ${contribution.campaignTitle} was rejected`,
+      toEmail: contribution.supporterEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/supporter/my-contributions',
+      read: false,
+      createdAt: new Date(),
+    });
 
     const updated = await contributions.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ contribution: updated });
@@ -568,6 +588,15 @@ app.post('/api/contributions', verifyToken, async (req, res) => {
 
     const result = await contributions.insertOne(contribution);
     const saved = { ...contribution, _id: result.insertedId };
+
+    await notifications.insertOne({
+      message: `${req.user.name} contributed ${contributionAmount} credits to ${campaign.title}`,
+      toEmail: campaign.creatorEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/creator',
+      read: false,
+      createdAt: new Date(),
+    });
 
     res.status(201).json({ contribution: saved });
   } catch (error) {
@@ -688,6 +717,15 @@ app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
       { $set: { status: 'approved' } },
     );
 
+    await notifications.insertOne({
+      message: `Your campaign ${campaign.title} has been approved`,
+      toEmail: campaign.creatorEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/creator/my-campaigns',
+      read: false,
+      createdAt: new Date(),
+    });
+
     const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ campaign: updated });
   } catch (error) {
@@ -713,6 +751,15 @@ app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
       { _id: new ObjectId(req.params.id) },
       { $set: { status: 'rejected' } },
     );
+
+    await notifications.insertOne({
+      message: `Your campaign ${campaign.title} has been rejected`,
+      toEmail: campaign.creatorEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/creator/my-campaigns',
+      read: false,
+      createdAt: new Date(),
+    });
 
     const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ campaign: updated });
@@ -752,6 +799,15 @@ app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
       { _id: new ObjectId(req.params.id) },
       { $set: { status: 'approved' } },
     );
+
+    await notifications.insertOne({
+      message: `Your withdrawal of ${withdrawal.withdrawalCredit} credits has been approved`,
+      toEmail: withdrawal.creatorEmail,
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/creator/withdrawals',
+      read: false,
+      createdAt: new Date(),
+    });
 
     const updated = await withdrawals.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ withdrawal: updated });
@@ -913,6 +969,41 @@ app.delete('/api/campaigns/:id/suspend', verifyToken, async (req, res) => {
 
     const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ campaign: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Notification routes ──────────────────────────────────────────
+
+app.get('/api/notifications', verifyToken, async (req, res) => {
+  try {
+    const items = await notifications
+      .find({ toEmail: req.user.email })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+    res.json({ notifications: items });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.patch('/api/notifications/:id/read', verifyToken, async (req, res) => {
+  try {
+    const notification = await notifications.findOne({ _id: new ObjectId(req.params.id) });
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found.' });
+    }
+    if (notification.toEmail !== req.user.email) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+    await notifications.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { read: true } },
+    );
+    const updated = await notifications.findOne({ _id: new ObjectId(req.params.id) });
+    res.json({ notification: updated });
   } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
