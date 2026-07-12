@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
@@ -35,6 +35,8 @@ const client = new MongoClient(uri, {
 
 let db;
 let users;
+let campaigns;
+let contributions;
 
 async function run() {
   try {
@@ -42,6 +44,8 @@ async function run() {
     console.log('Successfully connected to MongoDB!');
     db = client.db('fundfrog');
     users = db.collection('users');
+    campaigns = db.collection('campaigns');
+    contributions = db.collection('contributions');
   } finally {
     // await client.close();
   }
@@ -226,6 +230,143 @@ app.get('/api/auth/me', verifyToken, async (req, res) => {
 app.post('/api/auth/logout', (req, res) => {
   clearTokenCookie(res);
   res.json({ message: 'Logged out successfully.' });
+});
+
+// ─── Campaign routes ────────────────────────────────────────────────
+
+app.get('/api/campaigns', async (req, res) => {
+  try {
+    const { top_funded, category, status, search } = req.query;
+    const filter = {};
+
+    if (category) filter.category = category;
+    filter.status = status || 'approved';
+
+    if (search) {
+      filter.title = { $regex: search, $options: 'i' };
+    }
+
+    let cursor = campaigns.find(filter);
+
+    if (top_funded) {
+      cursor = cursor.sort({ amountRaised: -1 }).limit(6);
+    }
+
+    const results = await cursor.toArray();
+    res.json({ campaigns: results });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/campaigns/:id', async (req, res) => {
+  try {
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    res.json({ campaign });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.post('/api/campaigns', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Only creators can create campaigns.' });
+    }
+
+    const { title, story, category, fundingGoal, minimumContribution, deadline, rewardInfo, imageURL } = req.body;
+
+    if (!title || !story || !category || !fundingGoal || !minimumContribution || !deadline) {
+      return res.status(400).json({ message: 'Title, story, category, funding goal, minimum contribution, and deadline are required.' });
+    }
+
+    const campaign = {
+      title,
+      story,
+      category,
+      fundingGoal: Number(fundingGoal),
+      minimumContribution: Number(minimumContribution),
+      deadline,
+      rewardInfo: rewardInfo || '',
+      imageURL: imageURL || '',
+      creatorEmail: req.user.email,
+      creatorName: req.user.name,
+      amountRaised: 0,
+      status: 'pending',
+      createdAt: new Date(),
+    };
+
+    const result = await campaigns.insertOne(campaign);
+    const saved = { ...campaign, _id: result.insertedId };
+
+    res.status(201).json({ campaign: saved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.put('/api/campaigns/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Only creators can update campaigns.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    if (campaign.creatorEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You can only update your own campaigns.' });
+    }
+
+    const { title, story, rewardInfo } = req.body;
+    const update = {};
+    if (title !== undefined) update.title = title;
+    if (story !== undefined) update.story = story;
+    if (rewardInfo !== undefined) update.rewardInfo = rewardInfo;
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ message: 'At least one field (title, story, reward_info) must be provided.' });
+    }
+
+    await campaigns.updateOne({ _id: new ObjectId(req.params.id) }, { $set: update });
+    const updated = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+
+    res.json({ campaign: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.delete('/api/campaigns/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Only creators can delete campaigns.' });
+    }
+
+    const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found.' });
+    }
+    if (campaign.creatorEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You can only delete your own campaigns.' });
+    }
+
+    // Refund all approved supporters
+    const approvedContributions = await contributions.find({ campaignId: req.params.id, status: 'approved' }).toArray();
+    for (const c of approvedContributions) {
+      await users.updateOne({ email: c.supporterEmail }, { $inc: { credits: c.amount } });
+    }
+    await contributions.deleteMany({ campaignId: req.params.id });
+    await campaigns.deleteOne({ _id: new ObjectId(req.params.id) });
+
+    res.json({ message: 'Campaign deleted and supporters refunded.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
 });
 
 app.get('/', (req, res) => {
