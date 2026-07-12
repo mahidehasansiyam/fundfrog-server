@@ -105,6 +105,18 @@ function verifyToken(req, res, next) {
   }
 }
 
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Access denied. No token provided.' });
+    }
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+    }
+    next();
+  };
+}
+
 function sanitizeUser(user) {
   return {
     id: user._id.toString(),
@@ -281,12 +293,8 @@ app.get('/api/campaigns/:id', async (req, res) => {
   }
 });
 
-app.post('/api/campaigns', verifyToken, async (req, res) => {
+app.post('/api/campaigns', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Only creators can create campaigns.' });
-    }
-
     const { title, story, category, fundingGoal, minimumContribution, deadline, rewardInfo, imageURL } = req.body;
 
     if (!title || !story || !category || !fundingGoal || !minimumContribution || !deadline) {
@@ -318,12 +326,8 @@ app.post('/api/campaigns', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/campaigns/:id', verifyToken, async (req, res) => {
+app.put('/api/campaigns/:id', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Only creators can update campaigns.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });
@@ -351,12 +355,8 @@ app.put('/api/campaigns/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.delete('/api/campaigns/:id', verifyToken, async (req, res) => {
+app.delete('/api/campaigns/:id', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Only creators can delete campaigns.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });
@@ -381,12 +381,8 @@ app.delete('/api/campaigns/:id', verifyToken, async (req, res) => {
 
 // ─── Creator routes ───────────────────────────────────────────
 
-app.get('/api/creator/stats', verifyToken, async (req, res) => {
+app.get('/api/creator/stats', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Access denied. Creators only.' });
-    }
-
     const creatorCampaigns = await campaigns.find({ creatorEmail: req.user.email }).toArray();
     const totalCampaigns = creatorCampaigns.length;
     const now = new Date();
@@ -401,12 +397,8 @@ app.get('/api/creator/stats', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/creator/pending-contributions', verifyToken, async (req, res) => {
+app.get('/api/creator/pending-contributions', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Access denied. Creators only.' });
-    }
-
     const pending = await contributions
       .find({ creatorEmail: req.user.email, status: 'pending' })
       .sort({ date: -1 })
@@ -418,12 +410,8 @@ app.get('/api/creator/pending-contributions', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
+app.patch('/api/contributions/:id/approve', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Access denied. Creators only.' });
-    }
-
     const contribution = await contributions.findOne({ _id: new ObjectId(req.params.id) });
     if (!contribution) {
       return res.status(404).json({ message: 'Contribution not found.' });
@@ -461,12 +449,8 @@ app.patch('/api/contributions/:id/approve', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
+app.patch('/api/contributions/:id/reject', verifyToken, requireRole('creator'), async (req, res) => {
   try {
-    if (req.user.role !== 'creator') {
-      return res.status(403).json({ message: 'Access denied. Creators only.' });
-    }
-
     const contribution = await contributions.findOne({ _id: new ObjectId(req.params.id) });
     if (!contribution) {
       return res.status(404).json({ message: 'Contribution not found.' });
@@ -507,12 +491,8 @@ app.patch('/api/contributions/:id/reject', verifyToken, async (req, res) => {
 
 // ─── Supporter routes ──────────────────────────────────────────
 
-app.get('/api/supporter/stats', verifyToken, async (req, res) => {
+app.get('/api/supporter/stats', verifyToken, requireRole('supporter'), async (req, res) => {
   try {
-    if (req.user.role !== 'supporter') {
-      return res.status(403).json({ message: 'Access denied. Supporters only.' });
-    }
-
     const allContributions = await contributions.find({ supporterEmail: req.user.email }).toArray();
     const totalContributions = allContributions.length;
     const pendingCount = allContributions.filter((c) => c.status === 'pending').length;
@@ -526,12 +506,8 @@ app.get('/api/supporter/stats', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/supporter/approved-contributions', verifyToken, async (req, res) => {
+app.get('/api/supporter/approved-contributions', verifyToken, requireRole('supporter'), async (req, res) => {
   try {
-    if (req.user.role !== 'supporter') {
-      return res.status(403).json({ message: 'Access denied. Supporters only.' });
-    }
-
     const approved = await contributions
       .find({ supporterEmail: req.user.email, status: 'approved' })
       .sort({ date: -1 })
@@ -543,12 +519,8 @@ app.get('/api/supporter/approved-contributions', verifyToken, async (req, res) =
   }
 });
 
-app.post('/api/contributions', verifyToken, async (req, res) => {
+app.post('/api/contributions', verifyToken, requireRole('supporter'), async (req, res) => {
   try {
-    if (req.user.role !== 'supporter') {
-      return res.status(403).json({ message: 'Only supporters can contribute.' });
-    }
-
     const { campaignId, amount } = req.body;
     if (!campaignId || !amount) {
       return res.status(400).json({ message: 'Campaign ID and amount are required.' });
@@ -604,12 +576,8 @@ app.post('/api/contributions', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/contributions', verifyToken, async (req, res) => {
+app.get('/api/contributions', verifyToken, requireRole('supporter'), async (req, res) => {
   try {
-    if (req.user.role !== 'supporter') {
-      return res.status(403).json({ message: 'Access denied. Supporters only.' });
-    }
-
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -666,12 +634,8 @@ app.post('/api/payments/verify', async (req, res) => {
 
 // ─── Admin routes ──────────────────────────────────────────────
 
-app.get('/api/admin/stats', verifyToken, async (req, res) => {
+app.get('/api/admin/stats', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const supporters = await users.countDocuments({ role: 'supporter' });
     const creators = await users.countDocuments({ role: 'creator' });
     const creditResult = await users.aggregate([
@@ -685,12 +649,8 @@ app.get('/api/admin/stats', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/admin/pending-campaigns', verifyToken, async (req, res) => {
+app.get('/api/admin/pending-campaigns', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const pending = await campaigns.find({ status: 'pending' }).sort({ createdAt: -1 }).toArray();
     res.json({ campaigns: pending });
   } catch (error) {
@@ -698,12 +658,8 @@ app.get('/api/admin/pending-campaigns', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
+app.patch('/api/campaigns/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });
@@ -733,12 +689,8 @@ app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
+app.patch('/api/campaigns/:id/reject', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });
@@ -768,12 +720,8 @@ app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/admin/pending-withdrawals', verifyToken, async (req, res) => {
+app.get('/api/admin/pending-withdrawals', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const pending = await withdrawals.find({ status: 'pending' }).sort({ date: -1 }).toArray();
     res.json({ withdrawals: pending });
   } catch (error) {
@@ -781,12 +729,8 @@ app.get('/api/admin/pending-withdrawals', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
+app.patch('/api/withdrawals/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const withdrawal = await withdrawals.findOne({ _id: new ObjectId(req.params.id) });
     if (!withdrawal) {
       return res.status(404).json({ message: 'Withdrawal not found.' });
@@ -816,12 +760,8 @@ app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/users', verifyToken, async (req, res) => {
+app.get('/api/users', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const allUsers = await users.find({}).project({ password: 0 }).toArray();
     const sanitized = allUsers.map((u) => ({
       id: u._id.toString(),
@@ -839,12 +779,8 @@ app.get('/api/users', verifyToken, async (req, res) => {
   }
 });
 
-app.patch('/api/users/:id', verifyToken, async (req, res) => {
+app.patch('/api/users/:id', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const { role } = req.body;
     if (!role || !['supporter', 'creator', 'admin'].includes(role)) {
       return res.status(400).json({ message: 'Role must be "supporter", "creator", or "admin".' });
@@ -867,12 +803,8 @@ app.patch('/api/users/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', verifyToken, async (req, res) => {
+app.delete('/api/users/:id', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const user = await users.findOne({ _id: new ObjectId(req.params.id) });
     if (!user) {
       return res.status(404).json({ message: 'User not found.' });
@@ -890,12 +822,8 @@ app.delete('/api/users/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.delete('/api/campaigns/:id/admin', verifyToken, async (req, res) => {
+app.delete('/api/campaigns/:id/admin', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });
@@ -914,12 +842,8 @@ app.delete('/api/campaigns/:id/admin', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/reports', verifyToken, async (req, res) => {
+app.get('/api/reports', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const allReports = await reports.find({}).sort({ date: -1 }).toArray();
     res.json({ reports: allReports });
   } catch (error) {
@@ -951,12 +875,8 @@ app.post('/api/reports', verifyToken, async (req, res) => {
   }
 });
 
-app.delete('/api/campaigns/:id/suspend', verifyToken, async (req, res) => {
+app.delete('/api/campaigns/:id/suspend', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied. Admins only.' });
-    }
-
     const campaign = await campaigns.findOne({ _id: new ObjectId(req.params.id) });
     if (!campaign) {
       return res.status(404).json({ message: 'Campaign not found.' });

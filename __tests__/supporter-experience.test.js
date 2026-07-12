@@ -58,14 +58,22 @@ function createSupporterApp(mockContributionsCollection, mockCampaignsCollection
     }
   }
 
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+      }
+      if (!roles.includes(req.user.role)) {
+        return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+      }
+      next();
+    };
+  }
+
   // ── GET /api/supporter/stats ──────────────────────────────────────
 
-  app.get('/api/supporter/stats', verifyToken, async (req, res) => {
+  app.get('/api/supporter/stats', verifyToken, requireRole('supporter'), async (req, res) => {
     try {
-      if (req.user.role !== 'supporter') {
-        return res.status(403).json({ message: 'Access denied. Supporters only.' });
-      }
-
       const allContributions = await mockContributionsCollection
         .find({ supporterEmail: req.user.email })
         .toArray();
@@ -84,12 +92,8 @@ function createSupporterApp(mockContributionsCollection, mockCampaignsCollection
 
   // ── GET /api/supporter/approved-contributions ─────────────────────
 
-  app.get('/api/supporter/approved-contributions', verifyToken, async (req, res) => {
+  app.get('/api/supporter/approved-contributions', verifyToken, requireRole('supporter'), async (req, res) => {
     try {
-      if (req.user.role !== 'supporter') {
-        return res.status(403).json({ message: 'Access denied. Supporters only.' });
-      }
-
       const approved = await mockContributionsCollection
         .find({ supporterEmail: req.user.email, status: 'approved' })
         .sort({ date: -1 })
@@ -103,12 +107,8 @@ function createSupporterApp(mockContributionsCollection, mockCampaignsCollection
 
   // ── POST /api/contributions ───────────────────────────────────────
 
-  app.post('/api/contributions', verifyToken, async (req, res) => {
+  app.post('/api/contributions', verifyToken, requireRole('supporter'), async (req, res) => {
     try {
-      if (req.user.role !== 'supporter') {
-        return res.status(403).json({ message: 'Only supporters can contribute.' });
-      }
-
       const { campaignId, amount } = req.body;
       if (!campaignId || !amount) {
         return res.status(400).json({ message: 'Campaign ID and amount are required.' });
@@ -160,12 +160,8 @@ function createSupporterApp(mockContributionsCollection, mockCampaignsCollection
 
   // ── GET /api/contributions ────────────────────────────────────────
 
-  app.get('/api/contributions', verifyToken, async (req, res) => {
+  app.get('/api/contributions', verifyToken, requireRole('supporter'), async (req, res) => {
     try {
-      if (req.user.role !== 'supporter') {
-        return res.status(403).json({ message: 'Access denied. Supporters only.' });
-      }
-
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const skip = (page - 1) * limit;
@@ -432,7 +428,7 @@ describe('Supporter Experience API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Supporters only');
+      expect(result.body.message).toContain('Required role: supporter');
     });
 
     it('should return 403 when user is an unknown role', async () => {
@@ -453,7 +449,7 @@ describe('Supporter Experience API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Supporters only');
+      expect(result.body.message).toContain('Required role: supporter');
     });
   });
 
@@ -565,7 +561,7 @@ describe('Supporter Experience API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Supporters only');
+      expect(result.body.message).toContain('Required role: supporter');
     });
   });
 
@@ -791,7 +787,7 @@ describe('Supporter Experience API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Only supporters can contribute');
+      expect(result.body.message).toContain('Required role: supporter');
     });
 
     it('should return 404 when the campaign does not exist', async () => {
@@ -1121,7 +1117,7 @@ describe('Supporter Experience API (spec-based)', () => {
       );
 
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Supporters only');
+      expect(result.body.message).toContain('Required role: supporter');
     });
   });
 });

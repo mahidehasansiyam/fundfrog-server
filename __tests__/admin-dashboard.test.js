@@ -35,6 +35,18 @@ function createAdminApp(mockCollections) {
     }
   }
 
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+      }
+      if (!roles.includes(req.user.role)) {
+        return res.status(403).json({ message: `Access denied. Required role: ${roles.join(' or ')}.` });
+      }
+      next();
+    };
+  }
+
   function sanitizeUser(user) {
     return {
       id: user._id ? user._id.toString() : user.id,
@@ -47,11 +59,8 @@ function createAdminApp(mockCollections) {
   }
 
   // ─── GET /api/admin/stats ──────────────────────────────────────
-  app.get('/api/admin/stats', verifyToken, async (req, res) => {
+  app.get('/api/admin/stats', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const supporters = await users.countDocuments({ role: 'supporter' });
       const creators = await users.countDocuments({ role: 'creator' });
       const creditResult = await users.aggregate([
@@ -65,11 +74,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── GET /api/admin/pending-campaigns ─────────────────────────
-  app.get('/api/admin/pending-campaigns', verifyToken, async (req, res) => {
+  app.get('/api/admin/pending-campaigns', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const pending = await campaigns.find({ status: 'pending' }).sort({ createdAt: -1 }).toArray();
       res.json({ campaigns: pending });
     } catch (error) {
@@ -78,11 +84,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── PATCH /api/campaigns/:id/approve ──────────────────────────
-  app.patch('/api/campaigns/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/campaigns/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const campaign = await campaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -99,11 +102,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── PATCH /api/campaigns/:id/reject ───────────────────────────
-  app.patch('/api/campaigns/:id/reject', verifyToken, async (req, res) => {
+  app.patch('/api/campaigns/:id/reject', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const campaign = await campaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -120,11 +120,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── GET /api/admin/pending-withdrawals ───────────────────────
-  app.get('/api/admin/pending-withdrawals', verifyToken, async (req, res) => {
+  app.get('/api/admin/pending-withdrawals', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const pending = await withdrawals.find({ status: 'pending' }).sort({ date: -1 }).toArray();
       res.json({ withdrawals: pending });
     } catch (error) {
@@ -133,11 +130,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── PATCH /api/withdrawals/:id/approve ───────────────────────
-  app.patch('/api/withdrawals/:id/approve', verifyToken, async (req, res) => {
+  app.patch('/api/withdrawals/:id/approve', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const withdrawal = await withdrawals.findOne({ _id: req.params.id });
       if (!withdrawal) {
         return res.status(404).json({ message: 'Withdrawal not found.' });
@@ -154,11 +148,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── GET /api/users ─────────────────────────────────────────────
-  app.get('/api/users', verifyToken, async (req, res) => {
+  app.get('/api/users', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const allUsers = await users.find({}).project({ password: 0 }).toArray();
       const sanitized = allUsers.map((u) => ({
         id: u._id.toString(),
@@ -176,11 +167,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── PATCH /api/users/:id ──────────────────────────────────────
-  app.patch('/api/users/:id', verifyToken, async (req, res) => {
+  app.patch('/api/users/:id', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const { role } = req.body;
       if (!role || !['supporter', 'creator', 'admin'].includes(role)) {
         return res.status(400).json({ message: 'Role must be "supporter", "creator", or "admin".' });
@@ -198,11 +186,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── DELETE /api/users/:id ─────────────────────────────────────
-  app.delete('/api/users/:id', verifyToken, async (req, res) => {
+  app.delete('/api/users/:id', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const user = await users.findOne({ _id: req.params.id });
       if (!user) {
         return res.status(404).json({ message: 'User not found.' });
@@ -219,11 +204,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── DELETE /api/campaigns/:id/admin ───────────────────────────
-  app.delete('/api/campaigns/:id/admin', verifyToken, async (req, res) => {
+  app.delete('/api/campaigns/:id/admin', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const campaign = await campaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -242,11 +224,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── GET /api/reports ──────────────────────────────────────────
-  app.get('/api/reports', verifyToken, async (req, res) => {
+  app.get('/api/reports', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const allReports = await reports.find({}).sort({ date: -1 }).toArray();
       res.json({ reports: allReports });
     } catch (error) {
@@ -277,11 +256,8 @@ function createAdminApp(mockCollections) {
   });
 
   // ─── DELETE /api/campaigns/:id/suspend ─────────────────────────
-  app.delete('/api/campaigns/:id/suspend', verifyToken, async (req, res) => {
+  app.delete('/api/campaigns/:id/suspend', verifyToken, requireRole('admin'), async (req, res) => {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ message: 'Access denied. Admins only.' });
-      }
       const campaign = await campaigns.findOne({ _id: req.params.id });
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found.' });
@@ -515,7 +491,7 @@ describe('Admin Dashboard API (spec-based)', () => {
         Authorization: supporterToken(),
       });
       expect(result.status).toBe(403);
-      expect(result.body.message).toContain('Admins only');
+      expect(result.body.message).toContain('Required role: admin');
     });
   });
 
