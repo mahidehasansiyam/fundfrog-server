@@ -18,7 +18,7 @@ app.use(
     origin: 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key'],
   }),
 );
 
@@ -39,6 +39,7 @@ let campaigns;
 let contributions;
 let reports;
 let withdrawals;
+let payments;
 
 async function run() {
   try {
@@ -50,6 +51,7 @@ async function run() {
     contributions = db.collection('contributions');
     reports = db.collection('reports');
     withdrawals = db.collection('withdrawals');
+    payments = db.collection('payments');
   } finally {
     // await client.close();
   }
@@ -600,6 +602,35 @@ app.get('/api/contributions', verifyToken, async (req, res) => {
       totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Payment verify (internal, called by Next.js Route Handler) ──
+
+app.post('/api/payments/verify', async (req, res) => {
+  try {
+    const key = req.headers['x-internal-key'];
+    if (key !== process.env.INTERNAL_API_KEY) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    const { stripeSessionId, credits, email, name, amountPaid } = req.body;
+
+    await payments.insertOne({
+      email,
+      name,
+      creditsPurchased: credits,
+      amountPaid,
+      stripeSessionId,
+      date: new Date(),
+    });
+
+    await users.updateOne({ email }, { $inc: { credits } });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Verify error:', error);
     res.status(500).json({ message: 'Server error.' });
   }
 });
