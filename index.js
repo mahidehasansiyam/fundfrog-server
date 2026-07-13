@@ -772,6 +772,70 @@ app.patch('/api/withdrawals/:id/approve', verifyToken, requireRole('admin'), asy
   }
 });
 
+// ─── Creator withdrawal routes ─────────────────────────────────────
+
+app.post('/api/withdrawals', verifyToken, requireRole('creator'), async (req, res) => {
+  try {
+    const { credits, paymentSystem, accountNumber } = req.body;
+    if (!credits || !paymentSystem || !accountNumber) {
+      return res.status(400).json({ message: 'Credits, payment system, and account number are required.' });
+    }
+    const withdrawalCredits = Number(credits);
+    if (withdrawalCredits < 200) {
+      return res.status(400).json({ message: 'Minimum withdrawal is 200 credits.' });
+    }
+    if (!['bkash', 'nagad', 'bank'].includes(paymentSystem)) {
+      return res.status(400).json({ message: 'Payment system must be "bkash", "nagad", or "bank".' });
+    }
+    const user = await users.findOne({ email: req.user.email });
+    if (!user || user.credits < withdrawalCredits) {
+      return res.status(400).json({ message: 'Insufficient credits.' });
+    }
+
+    await users.updateOne({ email: req.user.email }, { $inc: { credits: -withdrawalCredits } });
+
+    const withdrawalAmount = (withdrawalCredits / 20).toFixed(2);
+    const withdrawal = {
+      creatorEmail: req.user.email,
+      creatorName: req.user.name,
+      withdrawalCredit: withdrawalCredits,
+      withdrawalAmount: Number(withdrawalAmount),
+      paymentSystem,
+      accountNumber,
+      date: new Date(),
+      status: 'pending',
+    };
+
+    const result = await withdrawals.insertOne(withdrawal);
+    const saved = { ...withdrawal, _id: result.insertedId };
+
+    await notifications.insertOne({
+      message: `${req.user.name} requested a withdrawal of ${withdrawalCredits} credits`,
+      toEmail: 'admin',
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/admin/withdrawal-requests',
+      read: false,
+      createdAt: new Date(),
+    });
+
+    res.status(201).json({ withdrawal: saved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/withdrawals', verifyToken, requireRole('creator'), async (req, res) => {
+  try {
+    const items = await withdrawals
+      .find({ creatorEmail: req.user.email })
+      .sort({ date: -1 })
+      .toArray();
+    res.json({ withdrawals: items });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
 app.get('/api/users', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const allUsers = await users.find({}).project({ password: 0 }).toArray();
