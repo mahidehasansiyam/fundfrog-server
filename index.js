@@ -59,11 +59,22 @@ async function run() {
   }
 }
 
-run().catch(console.dir);
+const dbReady = run();
+dbReady.catch(console.dir);
+
+// Wait for DB before processing any route
+app.use(async (req, res, next) => {
+  try {
+    await dbReady;
+    next();
+  } catch {
+    res.status(500).json({ message: 'Database connection failed.' });
+  }
+});
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: false,
+  secure: !!process.env.VERCEL,
   sameSite: 'lax',
   path: '/',
   maxAge: 7 * 24 * 60 * 60 * 1000,
