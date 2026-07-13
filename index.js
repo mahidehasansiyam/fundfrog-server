@@ -1004,7 +1004,7 @@ app.patch('/api/notifications/:id/read', verifyToken, async (req, res) => {
     res.status(500).json({ message: 'Server error.' });
   }
 });
-
+    
 app.get('/', (req, res) => {
   res.send('This is home page of client server.');
 });
