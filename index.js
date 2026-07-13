@@ -7,6 +7,17 @@ const { createAuth } = require('./auth');
 
 dotenv.config();
 
+const REQUIRED_ENV_VARS = ['MONGOBD_URI', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'INTERNAL_API_KEY'];
+
+function checkEnv() {
+  const missing = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+  if (missing.length) {
+    console.error(`Missing required env vars on Vercel: ${missing.join(', ')}`);
+    console.error('Add them in Vercel Dashboard → Settings → Environment Variables');
+  }
+}
+checkEnv();
+
 const uri = process.env.MONGOBD_URI;
 const app = express();
 const port = process.env.PORT || 9000;
@@ -20,18 +31,26 @@ app.use(
   }),
 );
 
-const mongoClient = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
-});
-
-const auth = createAuth(mongoClient.db('fundfrog'));
+let mongoClient;
+let auth;
+try {
+  if (!uri) throw new Error('MONGOBD_URI is not set — check Vercel env vars');
+  mongoClient = new MongoClient(uri, {
+    serverApi: {
+      version: ServerApiVersion.v1,
+      strict: true,
+      deprecationErrors: true,
+    },
+  });
+  auth = createAuth(mongoClient.db('fundfrog'));
+} catch (err) {
+  console.error('FATAL: initialization failed:', err.message);
+}
 
 // Better Auth must be mounted before express.json()
-app.all('/api/auth/{*any}', toNodeHandler(auth));
+if (auth) {
+  app.all('/api/auth/{*any}', toNodeHandler(auth));
+}
 
 app.use(express.json());
 
@@ -61,11 +80,19 @@ async function run() {
   }
 }
 
-const dbReady = run();
-dbReady.catch(console.dir);
+let dbReady = Promise.resolve();
+if (mongoClient) {
+  dbReady = run();
+  dbReady.catch((err) => console.error('MongoDB connection failed:', err.message));
+}
 
 // Wait for DB before processing any route
 app.use(async (req, res, next) => {
+  if (!mongoClient) {
+    return res.status(500).json({
+      message: 'Server configuration error — missing MONGOBD_URI. Check Vercel env vars.',
+    });
+  }
   try {
     await dbReady;
     next();
@@ -75,6 +102,9 @@ app.use(async (req, res, next) => {
 });
 
 async function verifyToken(req, res, next) {
+  if (!auth) {
+    return res.status(500).json({ message: 'Auth not initialized — check Vercel env vars.' });
+  }
   try {
     const headers = fromNodeHeaders(req.headers);
     const session = await auth.api.getSession({ headers });
