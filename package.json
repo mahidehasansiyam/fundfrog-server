@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "keywords": [],
   "author": "",

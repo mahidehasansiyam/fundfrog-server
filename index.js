@@ -2,8 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { toNodeHandler, fromNodeHeaders } = require('better-auth/node');
-const { createAuth } = require('./auth');
+
+// better-auth is ESM-only — use require on Node 22+ or catch gracefully
+let toNodeHandler, fromNodeHeaders, createAuth;
+try {
+  const betterAuthNode = require('better-auth/node');
+  toNodeHandler = betterAuthNode.toNodeHandler;
+  fromNodeHeaders = betterAuthNode.fromNodeHeaders;
+  createAuth = require('./auth').createAuth;
+} catch (err) {
+  console.error('FATAL: failed to load better-auth modules:', err.message);
+  console.error('Ensure Vercel uses Node.js 22.x (set in package.json engines)');
+}
 
 dotenv.config();
 
@@ -893,7 +903,24 @@ app.patch('/api/notifications/:id/read', verifyToken, async (req, res) => {
 });
     
 app.get('/', (req, res) => {
-  res.send('This is home page of client server.');
+  res.send('FundFrog server is running.');
+});
+
+app.get('/__health', (req, res) => {
+  res.json({
+    status: 'ok',
+    auth: !!auth,
+    mongoClient: !!mongoClient,
+    mongoConnected: !!db,
+    node: process.version,
+    env: {
+      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ? 'set' : 'missing',
+      MONGOBD_URI: process.env.MONGOBD_URI ? 'set' : 'missing',
+      BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ? 'set' : 'missing',
+      INTERNAL_API_KEY: process.env.INTERNAL_API_KEY ? 'set' : 'missing',
+      GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'set' : 'missing',
+    },
+  });
 });
 
 app.use((req, res) => {
