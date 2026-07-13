@@ -721,7 +721,16 @@ app.patch('/api/users/:id', verifyToken, requireRole('admin'), async (req, res) 
     );
 
     const updated = await users.findOne({ _id: new ObjectId(req.params.id) });
-    res.json({ user: sanitizeUser(updated) });
+    res.json({
+      user: {
+        id: updated._id.toString(),
+        name: updated.name,
+        email: updated.email,
+        photoURL: updated.photoURL || '',
+        role: updated.role,
+        credits: updated.credits,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
