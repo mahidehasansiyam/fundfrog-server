@@ -43,6 +43,7 @@ app.use(
 
 let mongoClient;
 let auth;
+let initError = null;
 try {
   if (!uri) throw new Error('MONGOBD_URI is not set — check Vercel env vars');
   mongoClient = new MongoClient(uri, {
@@ -52,9 +53,11 @@ try {
       deprecationErrors: true,
     },
   });
+  if (!createAuth) throw new Error('createAuth not loaded — better-auth require() failed');
   auth = createAuth(mongoClient.db('fundfrog'));
 } catch (err) {
-  console.error('FATAL: initialization failed:', err.message);
+  initError = err.message;
+  console.error('FATAL: initialization failed:', err);
 }
 
 // Better Auth must be mounted before express.json()
@@ -908,17 +911,19 @@ app.get('/', (req, res) => {
 
 app.get('/__health', (req, res) => {
   res.json({
-    status: 'ok',
+    status: auth ? 'ok' : 'degraded',
     auth: !!auth,
     mongoClient: !!mongoClient,
     mongoConnected: !!db,
     node: process.version,
+    initError,
     env: {
       BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ? 'set' : 'missing',
       MONGOBD_URI: process.env.MONGOBD_URI ? 'set' : 'missing',
       BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ? 'set' : 'missing',
       INTERNAL_API_KEY: process.env.INTERNAL_API_KEY ? 'set' : 'missing',
       GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? 'set' : 'missing',
+      GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'set' : 'missing',
     },
   });
 });
