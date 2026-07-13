@@ -1,9 +1,8 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
-import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
-import { createAuth } from './auth.js';
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createAuth } = require('./auth');
 
 dotenv.config();
 
@@ -22,6 +21,34 @@ const uri = process.env.MONGOBD_URI;
 const app = express();
 const port = process.env.PORT || 9000;
 
+let auth;
+let toNodeHandler;
+let fromNodeHeaders;
+let initError = null;
+
+// better-auth is ESM-only — use dynamic import() instead of require()
+const authReady = (async () => {
+  try {
+    const mod = await import('better-auth/node');
+    toNodeHandler = mod.toNodeHandler;
+    fromNodeHeaders = mod.fromNodeHeaders;
+    const { betterAuth } = await import('better-auth');
+    const { mongodbAdapter } = await import('better-auth/adapters/mongodb');
+
+    if (!uri) throw new Error('MONGOBD_URI is not set — check Vercel env vars');
+    const mongoClient = new MongoClient(uri, {
+      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+    });
+    auth = createAuth(mongoClient.db('fundfrog'), betterAuth, mongodbAdapter);
+
+    // Must be mounted before express.json()
+    app.all('/api/auth/{*any}', toNodeHandler(auth));
+  } catch (err) {
+    initError = err.message;
+    console.error('FATAL: auth initialization failed:', err);
+  }
+})();
+
 app.use(
   cors({
     origin: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
@@ -30,29 +57,6 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key'],
   }),
 );
-
-let mongoClient;
-let auth;
-let initError = null;
-try {
-  if (!uri) throw new Error('MONGOBD_URI is not set — check Vercel env vars');
-  mongoClient = new MongoClient(uri, {
-    serverApi: {
-      version: ServerApiVersion.v1,
-      strict: true,
-      deprecationErrors: true,
-    },
-  });
-  auth = createAuth(mongoClient.db('fundfrog'));
-} catch (err) {
-  initError = err.message;
-  console.error('FATAL: initialization failed:', err);
-}
-
-// Better Auth must be mounted before express.json()
-if (auth) {
-  app.all('/api/auth/{*any}', toNodeHandler(auth));
-}
 
 app.use(express.json());
 
@@ -83,9 +87,17 @@ async function run() {
 }
 
 let dbReady = Promise.resolve();
-if (mongoClient) {
+let mongoClient;
+try {
+  if (!uri) throw new Error('MONGOBD_URI is not set — check Vercel env vars');
+  mongoClient = new MongoClient(uri, {
+    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+  });
   dbReady = run();
   dbReady.catch((err) => console.error('MongoDB connection failed:', err.message));
+} catch (err) {
+  if (!initError) initError = err.message;
+  console.error('FATAL: MongoDB setup failed:', err);
 }
 
 // Wait for DB before processing any route
@@ -902,8 +914,6 @@ app.get('/__health', (req, res) => {
   res.json({
     status: auth ? 'ok' : 'degraded',
     auth: !!auth,
-    mongoClient: !!mongoClient,
-    mongoConnected: !!db,
     node: process.version,
     initError,
     env: {
@@ -927,4 +937,4 @@ if (!process.env.VERCEL) {
   });
 }
 
-export default app;
+module.exports = app;

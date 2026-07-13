@@ -1,7 +1,4 @@
-import { betterAuth } from 'better-auth';
-import { mongodbAdapter } from 'better-auth/adapters/mongodb';
-
-export function createAuth(db) {
+function createAuth(db, betterAuth, mongodbAdapter) {
   return betterAuth({
     database: mongodbAdapter(db),
     baseURL: process.env.BETTER_AUTH_URL,
@@ -49,3 +46,5 @@ export function createAuth(db) {
     },
   });
 }
+
+module.exports = { createAuth };
