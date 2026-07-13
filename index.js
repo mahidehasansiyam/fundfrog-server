@@ -15,7 +15,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fundfrog_jwt_secret_dev';
 
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key'],
@@ -261,7 +261,7 @@ app.get('/api/campaigns', async (req, res) => {
 
     if (category) filter.category = category;
     if (status) filter.status = status;
-    else filter.status = 'approved';
+    else if (!creatorEmail) filter.status = 'approved';
     if (creatorEmail) filter.creatorEmail = creatorEmail;
 
     if (search) {
@@ -632,6 +632,18 @@ app.post('/api/payments/verify', async (req, res) => {
   }
 });
 
+app.get('/api/payments', verifyToken, async (req, res) => {
+  try {
+    const items = await payments
+      .find({ email: req.user.email })
+      .sort({ date: -1 })
+      .toArray();
+    res.json({ payments: items });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
 // ─── Admin routes ──────────────────────────────────────────────
 
 app.get('/api/admin/stats', verifyToken, requireRole('admin'), async (req, res) => {
@@ -755,6 +767,70 @@ app.patch('/api/withdrawals/:id/approve', verifyToken, requireRole('admin'), asy
 
     const updated = await withdrawals.findOne({ _id: new ObjectId(req.params.id) });
     res.json({ withdrawal: updated });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Creator withdrawal routes ─────────────────────────────────────
+
+app.post('/api/withdrawals', verifyToken, requireRole('creator'), async (req, res) => {
+  try {
+    const { credits, paymentSystem, accountNumber } = req.body;
+    if (!credits || !paymentSystem || !accountNumber) {
+      return res.status(400).json({ message: 'Credits, payment system, and account number are required.' });
+    }
+    const withdrawalCredits = Number(credits);
+    if (withdrawalCredits < 200) {
+      return res.status(400).json({ message: 'Minimum withdrawal is 200 credits.' });
+    }
+    if (!['bkash', 'nagad', 'bank'].includes(paymentSystem)) {
+      return res.status(400).json({ message: 'Payment system must be "bkash", "nagad", or "bank".' });
+    }
+    const user = await users.findOne({ email: req.user.email });
+    if (!user || user.credits < withdrawalCredits) {
+      return res.status(400).json({ message: 'Insufficient credits.' });
+    }
+
+    await users.updateOne({ email: req.user.email }, { $inc: { credits: -withdrawalCredits } });
+
+    const withdrawalAmount = (withdrawalCredits / 20).toFixed(2);
+    const withdrawal = {
+      creatorEmail: req.user.email,
+      creatorName: req.user.name,
+      withdrawalCredit: withdrawalCredits,
+      withdrawalAmount: Number(withdrawalAmount),
+      paymentSystem,
+      accountNumber,
+      date: new Date(),
+      status: 'pending',
+    };
+
+    const result = await withdrawals.insertOne(withdrawal);
+    const saved = { ...withdrawal, _id: result.insertedId };
+
+    await notifications.insertOne({
+      message: `${req.user.name} requested a withdrawal of ${withdrawalCredits} credits`,
+      toEmail: 'admin',
+      fromEmail: req.user.email,
+      actionRoute: '/dashboard/admin/withdrawal-requests',
+      read: false,
+      createdAt: new Date(),
+    });
+
+    res.status(201).json({ withdrawal: saved });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/withdrawals', verifyToken, requireRole('creator'), async (req, res) => {
+  try {
+    const items = await withdrawals
+      .find({ creatorEmail: req.user.email })
+      .sort({ date: -1 })
+      .toArray();
+    res.json({ withdrawals: items });
   } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
@@ -937,6 +1013,10 @@ app.use((req, res) => {
   res.status(404).json({ message: `Route ${req.originalUrl} not found` });
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+}
+
+module.exports = app;
