@@ -3,6 +3,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { createAuth } = require('./auth');
+const Stripe = require('stripe');
 
 // On Vercel, env vars are injected by the platform — don't load .env (which has
 // http://localhost URLs that break OAuth). Dev/local: load .env normally.
@@ -511,6 +512,48 @@ app.get('/api/contributions', verifyToken, requireRole('supporter'), async (req,
       totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// ─── Stripe checkout (creates Stripe Checkout Session) ────────────
+
+app.post('/api/payments/create-checkout', verifyToken, requireRole('supporter'), async (req, res) => {
+  try {
+    const { credits } = req.body;
+    const validPackages = [100, 300, 800, 1500];
+    if (!credits || !validPackages.includes(credits)) {
+      return res.status(400).json({ message: 'Invalid credit package.' });
+    }
+
+    const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+    const origin = req.headers.origin || process.env.BETTER_AUTH_URL || 'http://localhost:3000';
+
+    const session = await stripe.checkout.sessions.create({
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: { name: `${credits} Credits` },
+            unit_amount: credits * 10,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${origin}/api/payments/confirm?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/dashboard/supporter/purchase-credit?payment=cancelled`,
+      client_reference_id: req.user.id,
+      metadata: {
+        credits: credits.toString(),
+        email: req.user.email,
+        name: req.user.name,
+      },
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('Stripe checkout error:', error);
     res.status(500).json({ message: 'Server error.' });
   }
 });
