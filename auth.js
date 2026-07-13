@@ -1,7 +1,21 @@
 function createAuth(db, betterAuth, mongodbAdapter) {
+  const baseURL = process.env.BETTER_AUTH_URL;
+
+  // On Vercel (or any deploy behind a proxy), trust x-forwarded-* headers so
+  // Better Auth auto-detects the correct origin from the proxied request.
+  // When baseURL is unset, Better Auth falls through to per-request detection
+  // which reads x-forwarded-host/proto (if trustedProxyHeaders is set) or the
+  // request URL – both of which give the correct origin in production.
+  const isDeployed = !!(process.env.VERCEL || process.env.NODE_ENV === 'production');
+  const useLocalhostBase = baseURL && baseURL.includes('localhost');
+  const resolvedBase = isDeployed && useLocalhostBase ? undefined : baseURL;
+
   return betterAuth({
     database: mongodbAdapter(db),
-    baseURL: process.env.BETTER_AUTH_URL,
+    baseURL: resolvedBase,
+    advanced: {
+      trustedProxyHeaders: isDeployed,
+    },
     emailAndPassword: {
       enabled: true,
     },

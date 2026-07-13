@@ -4,18 +4,34 @@ const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { createAuth } = require('./auth');
 
-dotenv.config();
+// On Vercel, env vars are injected by the platform — don't load .env (which has
+// http://localhost URLs that break OAuth). Dev/local: load .env normally.
+if (!process.env.VERCEL) {
+  dotenv.config();
+}
 
-const REQUIRED_ENV_VARS = ['MONGOBD_URI', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'INTERNAL_API_KEY'];
+const REQUIRED_ENV_VARS = ['MONGOBD_URI', 'BETTER_AUTH_SECRET', 'INTERNAL_API_KEY'];
 
 function checkEnv() {
   const missing = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
   if (missing.length) {
-    console.error(`Missing required env vars on Vercel: ${missing.join(', ')}`);
-    console.error('Add them in Vercel Dashboard → Settings → Environment Variables');
+    console.error(`Missing required env vars: ${missing.join(', ')}`);
+    console.error('Set them in Vercel Dashboard → Settings → Environment Variables');
   }
 }
 checkEnv();
+
+const isDeployed = !!(process.env.VERCEL || process.env.NODE_ENV === 'production');
+if (isDeployed && process.env.BETTER_AUTH_URL?.includes('localhost')) {
+  console.warn('⚠️  BETTER_AUTH_URL contains localhost but this app is deployed.');
+  console.warn('   Set BETTER_AUTH_URL to your client URL in Vercel Dashboard → Settings.');
+  console.warn('   Example: BETTER_AUTH_URL=https://fundfrog-client.vercel.app');
+}
+if (isDeployed && !process.env.BETTER_AUTH_URL) {
+  console.log('ℹ️  BETTER_AUTH_URL not set — Better Auth will auto-detect the correct');
+  console.log('   origin from the proxied request headers (trustedProxyHeaders enabled).');
+  console.log('   If OAuth callbacks fail, set BETTER_AUTH_URL explicitly.');
+}
 
 const uri = process.env.MONGOBD_URI;
 const app = express();
