@@ -57,11 +57,14 @@ function createAuthApp(mockUsersCollection) {
 
   function verifyToken(req, res, next) {
     let token = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.split(' ')[1];
-    } else if (req.cookies && req.cookies.token) {
+    // Spec: reads from req.cookies.token FIRST, falls back to Authorization Bearer header
+    if (req.cookies && req.cookies.token) {
       token = req.cookies.token;
+    } else {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+      }
     }
     if (!token) {
       return res.status(401).json({ message: 'Access denied. No token provided.' });
@@ -613,6 +616,43 @@ describe('Auth API (spec-based)', () => {
 
       expect(result.status).toBe(200);
       expect(result.body.user.email).toBe('bearer@example.com');
+    });
+
+    it('should prefer cookie token over Authorization Bearer header when both are provided', async () => {
+      await harness.start();
+
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439020',
+        name: 'Cookie Priority User',
+        email: 'cookiepriority@example.com',
+        photoURL: '',
+        role: 'supporter',
+        credits: 50,
+      };
+
+      const verifySpy = vi.spyOn(jwt, 'verify').mockReturnValue({
+        id: '507f1f77bcf86cd799439020',
+        email: 'cookiepriority@example.com',
+        name: 'Cookie Priority User',
+        role: 'supporter',
+      });
+
+      mockUsersCollection.findOne.mockResolvedValue(mockUser);
+
+      // Provide BOTH cookie and Bearer header — cookie must take precedence
+      const result = await harness.request(
+        'GET',
+        '/api/auth/me',
+        undefined,
+        {
+          Cookie: 'token=valid-cookie-token',
+          Authorization: 'Bearer invalid-bearer-token',
+        },
+      );
+
+      expect(result.status).toBe(200);
+      // Verify that cookie token was used (not the Bearer token which would also appear valid)
+      expect(verifySpy).toHaveBeenCalledWith('valid-cookie-token', expect.any(String));
     });
   });
 

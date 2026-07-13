@@ -28,7 +28,7 @@ const mongoClient = new MongoClient(uri, {
   },
 });
 
-const auth = createAuth(mongoClient);
+const auth = createAuth(mongoClient.db('fundfrog'));
 
 // Better Auth must be mounted before express.json()
 app.all('/api/auth/{*any}', toNodeHandler(auth));

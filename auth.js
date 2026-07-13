@@ -1,9 +1,10 @@
 const { betterAuth } = require('better-auth');
 const { mongodbAdapter } = require('better-auth/adapters/mongodb');
 
-function createAuth(mongoClient) {
+function createAuth(db) {
   return betterAuth({
-    database: mongodbAdapter(mongoClient),
+    database: mongodbAdapter(db),
+    baseURL: process.env.BETTER_AUTH_URL,
     emailAndPassword: {
       enabled: true,
     },
