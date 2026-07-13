@@ -47,6 +47,10 @@ const authReady = (async () => {
     initError = err.message;
     console.error('FATAL: auth initialization failed:', err);
   }
+  // Register catch-all 404 handler AFTER auth route so auth doesn't 404
+  app.use((req, res) => {
+    res.status(404).json({ message: `Route ${req.originalUrl} not found` });
+  });
 })();
 
 app.use(
@@ -925,10 +929,6 @@ app.get('/__health', (req, res) => {
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? 'set' : 'missing',
     },
   });
-});
-
-app.use((req, res) => {
-  res.status(404).json({ message: `Route ${req.originalUrl} not found` });
 });
 
 if (!process.env.VERCEL) {
