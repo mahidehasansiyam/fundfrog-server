@@ -1,19 +1,9 @@
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-
-// better-auth is ESM-only — use require on Node 22+ or catch gracefully
-let toNodeHandler, fromNodeHeaders, createAuth;
-try {
-  const betterAuthNode = require('better-auth/node');
-  toNodeHandler = betterAuthNode.toNodeHandler;
-  fromNodeHeaders = betterAuthNode.fromNodeHeaders;
-  createAuth = require('./auth').createAuth;
-} catch (err) {
-  console.error('FATAL: failed to load better-auth modules:', err.message);
-  console.error('Ensure Vercel uses Node.js 22.x (set in package.json engines)');
-}
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
+import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
+import { createAuth } from './auth.js';
 
 dotenv.config();
 
@@ -53,7 +43,6 @@ try {
       deprecationErrors: true,
     },
   });
-  if (!createAuth) throw new Error('createAuth not loaded — better-auth require() failed');
   auth = createAuth(mongoClient.db('fundfrog'));
 } catch (err) {
   initError = err.message;
@@ -938,5 +927,4 @@ if (!process.env.VERCEL) {
   });
 }
 
-module.exports = app;
-     
+export default app;
