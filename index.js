@@ -261,7 +261,7 @@ app.get('/api/campaigns', async (req, res) => {
 
     if (category) filter.category = category;
     if (status) filter.status = status;
-    else filter.status = 'approved';
+    else if (!creatorEmail) filter.status = 'approved';
     if (creatorEmail) filter.creatorEmail = creatorEmail;
 
     if (search) {
@@ -628,6 +628,18 @@ app.post('/api/payments/verify', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Verify error:', error);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+app.get('/api/payments', verifyToken, async (req, res) => {
+  try {
+    const items = await payments
+      .find({ email: req.user.email })
+      .sort({ date: -1 })
+      .toArray();
+    res.json({ payments: items });
+  } catch (error) {
     res.status(500).json({ message: 'Server error.' });
   }
 });
